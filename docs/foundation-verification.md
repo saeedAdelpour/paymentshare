@@ -28,10 +28,15 @@ the user's configured application database was not migrated or otherwise changed
   to v0.144.0 removed the findings; the scan then reported no vulnerabilities.
   oapi-codegen v2.5.1 was incompatible with the patched parser, so the tool module
   was upgraded to v2.8.2 and generated code was regenerated.
+- Review regressions now cover undeclared response statuses (including redirects)
+  and a migration command whose real PostgreSQL unlock response is withheld by a
+  local TCP proxy. The cancellation test failed before bounded cleanup was added.
+  Cleanup is limited to five seconds and a subsequent normal migration succeeds.
 - Full `make ci` passed: browser-asset integrity, formatting, OpenAPI validation,
   generation comparison, negative contract-tooling checks, build, lint (zero
   issues), vulnerability scan (no vulnerabilities), and the complete race-enabled
-  suite with real PostgreSQL integration tests.
+  suite with real PostgreSQL integration tests. The final rerun after both review
+  fixes also passed, including the stalled-unlock cancellation regression.
 
 The first database checks used a cached PostgreSQL 17.6 image while Docker Hub
 was unavailable. They were repeated successfully on the pinned 17.11 image after

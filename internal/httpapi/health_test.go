@@ -54,3 +54,17 @@ func validateContract(t *testing.T, path string, response *httptest.ResponseReco
 	defer func() { _ = result.Body.Close() }()
 	testutil.ValidateExchange(t, httptest.NewRequest(http.MethodGet, path, nil), result)
 }
+
+func TestHealthContractRejectsUndocumentedStatuses(t *testing.T) {
+	for _, status := range []int{http.StatusAccepted, http.StatusFound, http.StatusTeapot} {
+		request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		recorder := httptest.NewRecorder()
+		httpapi.New(nil, false).ServeHTTP(recorder, request)
+		response := recorder.Result()
+		response.StatusCode = status
+		if err := testutil.CheckExchange(request, response); err == nil {
+			t.Fatalf("contract accepted undocumented status %d", status)
+		}
+		_ = response.Body.Close()
+	}
+}

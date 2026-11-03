@@ -3,7 +3,7 @@ package testutil
 
 import (
 	"bytes"
-	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -18,28 +18,38 @@ import (
 // contract and restores the response body for the caller's behavioral assertions.
 func ValidateExchange(t testing.TB, request *http.Request, response *http.Response) {
 	t.Helper()
-	spec, err := contract.Load(context.Background(), api.Document)
-	if err != nil {
+	if err := CheckExchange(request, response); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// CheckExchange reports contract mismatches, including undeclared redirect statuses.
+func CheckExchange(request *http.Request, response *http.Response) error {
+	spec, err := contract.Load(request.Context(), api.Document)
+	if err != nil {
+		return err
 	}
 	router, err := legacy.NewRouter(spec)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	route, params, err := router.FindRoute(request)
 	if err != nil {
-		t.Fatal(err)
+		return err
+	}
+	if route.Operation.Responses.Status(response.StatusCode) == nil && route.Operation.Responses.Default() == nil {
+		return fmt.Errorf("response status %d is not declared for %s %s", response.StatusCode, request.Method, request.URL.Path)
 	}
 	input := &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route}
 	if err := openapi3filter.ValidateRequest(request.Context(), input); err != nil {
-		t.Fatal(err)
+		return err
 	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	if err := response.Body.Close(); err != nil {
-		t.Fatal(err)
+		return err
 	}
 	response.Body = io.NopCloser(bytes.NewReader(body))
 	if err := openapi3filter.ValidateResponse(request.Context(), &openapi3filter.ResponseValidationInput{
@@ -47,7 +57,9 @@ func ValidateExchange(t testing.TB, request *http.Request, response *http.Respon
 		Status:                 response.StatusCode,
 		Header:                 response.Header,
 		Body:                   io.NopCloser(bytes.NewReader(body)),
+		Options:                &openapi3filter.Options{IncludeResponseStatus: true},
 	}); err != nil {
-		t.Fatal(err)
+		return err
 	}
+	return nil
 }

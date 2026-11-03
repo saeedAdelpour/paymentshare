@@ -23,7 +23,9 @@ helper enables docs; deploy the binary directly instead of using `make dev`.
    intended database. It defaults to the release's latest version; `-to N` chooses
    an explicit local target. It serializes with other migration jobs using a
    PostgreSQL advisory lock, uses one transaction per SQL migration, and stops
-   after a 60-second deadline. The database must support session advisory locks;
+   after a 60-second work deadline, with at most five additional seconds for
+   detached unlock cleanup. A connection whose unlock fails is discarded rather
+   than returned to the pool. The database must support session advisory locks;
    use a direct connection rather than transaction-mode pooling for migrations.
 4. Only after that job succeeds, start the API binary with runtime credentials.
    Startup reads Goose's version without creating its table. An absent,

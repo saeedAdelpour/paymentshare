@@ -86,7 +86,8 @@ go run ./cmd/api
 
 Goose **v3.29.0** executes embedded, reviewed SQL migrations transactionally and
 serializes execution with a PostgreSQL session advisory lock. Commands have a
-60-second deadline. Repeating a target is harmless. Unsupported targets and
+60-second work deadline plus at most five seconds for detached unlock cleanup.
+Repeating a target is harmless. Unsupported targets and
 schemas newer than the migration binary are rejected. Version zero is deliberately
 incompatible with the current server, which expects **version 1**.
 
@@ -135,7 +136,10 @@ and unavailable readiness, alongside explicit behavior assertions. Database test
 execute the real migration binary, create random schemas, and remove only their
 own schemas afterward. They check target-version Up/Down/Up, retained fixtures,
 unmigrated/older/newer schema rejection, startup without automatic migrations,
-readiness after a schema change, and graceful shutdown. Never point tests at
+readiness after a schema change, bounded cancellation/unlock cleanup through a
+real PostgreSQL TCP proxy,
+and graceful shutdown. The fault-injection test requires a local TCP database
+that permits non-TLS connections (as provided by Compose/CI). Never point tests at
 production. Missing `TEST_DATABASE_URL` is a failure, not a silent skip.
 
 The [CI job](.github/workflows/quality.yml) supplies PostgreSQL 17.11 and runs
