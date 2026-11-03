@@ -1,156 +1,82 @@
 # Payment Share API
 
-Go/Chi backend with PostgreSQL persistence and OIDC access-token authentication.
-This slice supports registered users and creating, listing, reading, and renaming
-workspaces. Membership management and expense/repayment features are later tickets.
+The first foundation step is a Go/Chi HTTP server with a GORM PostgreSQL
+connection pool. It checks database connectivity before listening, handles
+SIGINT/SIGTERM with up to 10 seconds to drain requests, and closes the pool.
+It does not yet implement authentication, administration, or business APIs.
 
-## Contributing
+Follow the [engineering standards](docs/engineering-standards.md) and
+[architecture decisions](docs/adr/) when contributing.
 
-Follow the [engineering standards](docs/engineering-standards.md) when planning,
-implementing, and reviewing changes. Architectural decisions live in
-[`docs/adr/`](docs/adr/); they also describe planned changes beyond the current
-implementation.
+## Run locally
 
-## Local setup
-
-Install Go 1.27+, Docker with Compose, curl, and jq. From the repository root:
+Install Go 1.27 or newer. Create a PostgreSQL database and login yourself;
+the server does not create databases, tables, or run migrations.
 
 ```sh
 cp .env.example .env
+# Edit .env with your database connection details, then export it:
 set -a
 . ./.env
 set +a
-make dev
-```
-
-PostgreSQL listens on `127.0.0.1:55432`; Keycloak listens on
-`http://localhost:18080`. Wait for Keycloak's realm import to finish:
-
-```sh
-until curl -fsS "$OIDC_ISSUER/.well-known/openid-configuration" >/dev/null; do
-  sleep 2
-done
+make deps
 make run
 ```
 
-The API listens on `127.0.0.1:8082`. Startup applies embedded, ordered migrations
-in one transaction under a database advisory lock. `make migrate` applies them
-without starting the API. Repeated runs preserve existing data. Compose uses
-named volumes for both services; `docker compose down` preserves them.
+`.env` is ignored by Git and is not loaded automatically. Keep credentials there
+or in your deployment's secret store. URL-encode special characters in URL
+usernames/passwords. The pgx keyword/value connection format is also supported.
 
-The development realm has Alice (`alice` / `alice-local`) and Bob
-(`bob` / `bob-local`), both with verified `@example.test` emails. The Keycloak
-admin console is `http://localhost:18080/admin/` (`admin` / `local-admin`).
-It supports registration/login; newly registered users need a verified email
-before using this API. For local manual testing, mark their email verified in
-the admin console. A deployed provider must perform real email verification.
-
-The local CLI client permits a password grant to make backend testing convenient:
-
-```sh
-TOKENS=$(curl -fsS "$OIDC_ISSUER/protocol/openid-connect/token" \
-  -d grant_type=password -d client_id=paymentshare-local \
-  -d username=alice -d password=alice-local -d 'scope=openid email profile')
-TOKEN=$(printf '%s' "$TOKENS" | jq -r .access_token)
-
-curl -fsS http://localhost:8082/me -H "Authorization: Bearer $TOKEN"
-curl -fsS http://localhost:8082/workspaces \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Home","currency":"USD"}'
-curl -fsS http://localhost:8082/workspaces -H "Authorization: Bearer $TOKEN"
-# Use the workspace ID from the creation response:
-curl -fsS -X PATCH http://localhost:8082/workspaces/WORKSPACE_ID \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"New home"}'
-```
-
-Use `access_token`, never `id_token`. Local credentials, password grants,
-development-mode Keycloak, and HTTP are for local development only. Deployed
-clients should use their provider's authorization-code flow with PKCE and HTTPS.
-The supplied realm follows Keycloak's documented [container setup](https://www.keycloak.org/server/containers)
-and [startup realm import](https://www.keycloak.org/server/importExport).
-Realm imports skip existing realms; editing the JSON does not overwrite a realm
-already persisted in the local Keycloak volume.
-
-## Configuration and identity contract
-
-| Variable | Meaning |
+| Variable | Behavior |
 | --- | --- |
 | `DATABASE_URL` | Required PostgreSQL connection string |
-| `OIDC_ISSUER` | Required exact discovery issuer URL |
-| `OIDC_AUDIENCE` | Required dedicated API audience, distinct from the login client |
-| `SUPPORTED_CURRENCIES` | Comma-separated supported codes; defaults to `USD,EUR,GBP,IRR` |
-| `HTTP_ADDR` | Defaults to `127.0.0.1:8082` |
-| `TEST_DATABASE_URL` | Required for tests; role must be able to create schemas |
+| `HTTP_ADDR` | Defaults to `127.0.0.1:8082`; use `:8082` for container access |
+| `TEST_DATABASE_URL` | Required by `make test-integration`; use a dedicated test database |
 
-The provider must issue RS256-signed JWT **access tokens** carrying `iss`, `sub`,
-`aud`, `exp`, `email`, and boolean `email_verified: true`. Supported purpose
-markers are the protected JWT header `typ: at+jwt` (also `application/at+jwt`),
-or Keycloak's protected `typ: JWT` with the signed payload `typ: Bearer`.
-Other token profiles and opaque access tokens require an adapter change; merely
-matching issuer and audience never makes an ID token acceptable. The verifier
-uses discovery/JWKS, caches keys, validates signatures locally, and rejects
-expired or not-yet-valid tokens. It does not introspect tokens on each request.
-Provider logout/revocation therefore takes effect when an issued token expires;
-workspace authorization is read from PostgreSQL on every request.
-
-Registration in the API happens on the first authenticated request. Internal
-user IDs are stable for `(issuer, subject)`, even if the verified email changes.
-Emails are stored exactly as verified; they are not normalized or used to merge
-identities. An email already held by another identity returns `409`. The provider
-must restrict verification to addresses the person controls. Hosted provider
-selection and production provisioning remain deployment work.
-
-## HTTP contract
-
-All endpoints require `Authorization: Bearer <access_token>` and return JSON.
-Successful workspace responses contain `id`, `name`, `currency`, and `owner_id`.
-
-| Method and path | Request / response |
-| --- | --- |
-| `GET /me` | `200` with internal `id` and verified `email` |
-| `POST /workspaces` | `{ "name": "Home", "currency": "USD" }`; `201` plus `Location` |
-| `GET /workspaces` | `200` array of accessible workspaces, ordered by ID; empty array when none |
-| `GET /workspaces/{id}` | `200` workspace |
-| `PATCH /workspaces/{id}` | `{ "name": "New home" }`; owner-only, `200` updated workspace |
-
-Names are trimmed, must contain 1–120 Unicode characters, and cannot contain
-control characters. Currency must exactly match a configured code. Rename
-cannot change currency or ownership. Unknown fields, malformed JSON, invalid
-IDs, and invalid workspace values return `400`; bodies are limited to 16 KiB.
-Authentication failures return `401` with `WWW-Authenticate`; inaccessible or
-missing workspaces return `404`. A future ordinary member attempting an owner
-operation receives `403`. Errors are `{ "error": "message" }`.
-
-Each workspace has one owner, who is also a member, and one currency. Workspace
-and owner membership are committed atomically; PostgreSQL enforces the owner
-membership relationship. Renames lock the workspace and caller's membership,
-check the current owner, and commit the change together. Failed mutations leave
-workspace state unchanged. Creation request-key semantics and currency changes
-are not part of this ticket.
-
-## Tests and checks
+The example disables TLS only for local development. Configure TLS verification
+(e.g. `sslmode=verify-full` and trusted certificates) for remote deployments.
+A failed initial connection exits nonzero without printing the connection string
+or driver errors, which can contain credentials. Check database-side logs for
+connection failure details. Initial connection checks have a five-second timeout.
+The pool allows ten open/five idle connections, with a 30-minute lifetime and
+five-minute idle lifetime. These are initial limits, not measured capacity claims.
 
 ```sh
-# After exporting .env as above; Keycloak is not required for automated tests.
-docker compose up -d --wait postgres
-make check
-make test
-# Focused HTTP scenario:
-go test ./integration -run TestOnlyOwnerCanReadAndRenameWorkspace -count=1
+curl -i http://127.0.0.1:8082/healthz
+curl -i http://127.0.0.1:8082/readyz
 ```
 
-Tests fail explicitly if `TEST_DATABASE_URL` is missing. Each test creates its
-own random PostgreSQL schema, applies migrations, exercises the API over HTTP
-with a controlled local RSA/JWKS identity provider, and drops its schema on
-completion. They never truncate application tables. Assertions observe HTTP
-responses, including persisted data after API restart, concurrent initial
-registration, cross-user isolation, rejected writes, and invalid access tokens.
+`GET /healthz` returns `200 {"status":"ok"}` without querying the database.
+`GET /readyz` checks PostgreSQL with a two-second timeout and returns `200` with
+`{"status":"ok"}` or `503` with `{"status":"unavailable"}`. Both are public,
+return JSON, and disable caching. Readiness checks connectivity only, not schema
+compatibility. No schema is required in this initial step.
 
-The single Payment Share bounded context is organized as:
+## Contract and checks
 
-- `internal/domain`: user and workspace concepts and workspace invariants.
-- `internal/application`: use cases, authorization, repository contracts, transactions.
-- `internal/httpapi`, `internal/identity`, `internal/postgres`: adapters.
-- `internal/server`: composition; `cmd/api` and `cmd/migrate`: executables.
-- `migrations`: embedded, versioned PostgreSQL schema.
+[`api/openapi.yaml`](api/openapi.yaml) is the health API source of truth. The
+Chi server interface and response types are generated inside the HTTP adapter
+using pinned oapi-codegen v2.5.1. Commit generated code alongside the contract.
+
+```sh
+make generate        # regenerate the HTTP interface
+make check-generated # fail if generated output is stale
+make check           # formatting, generated output, build, vet
+make test            # race-enabled unit/HTTP tests
+make test-integration # real PostgreSQL health checks; requires TEST_DATABASE_URL
+```
+
+Integration tests never migrate, truncate, or change database records. They check
+healthy readiness, unavailable readiness after closing the pool, and independent
+process liveness. An explicitly invoked integration run fails if configuration is
+missing. The normal unit suite does not claim to verify database connectivity.
+
+## Remaining foundation work
+
+Ticket [01](.scratch/payment-share-foundation/issues/01-runnable-project-quality-checks.md)
+remains incomplete: Swagger UI, full contract validation and HTTP contract tests,
+Goose migrations and startup schema compatibility, migration reversal/recovery
+checks, pinned formatting/lint/security tools, and CI are subsequent steps.
+Identity and QOR5 administration follow in foundation 02 and 03. There is no
+schema change to roll back in this step. Production deployment and database
+recovery procedures remain unverified; no production-readiness claim is made.

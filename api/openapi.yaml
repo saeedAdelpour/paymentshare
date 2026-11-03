@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: Payment Share API
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Process liveness; does not check PostgreSQL
+      responses:
+        '200':
+          description: Process is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: PostgreSQL connectivity; does not yet check schema compatibility
+      responses:
+        '200':
+          description: PostgreSQL is reachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: PostgreSQL is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+components:
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
