@@ -16,6 +16,19 @@ A former workspace member whose history and balance are retained. Their access i
 **Owner**:
 The member responsible for a workspace who can grant permissions to other members.
 
+**Service administrator**:
+A person authorized to access records across all workspaces to operate Payment Share.
+_Avoid_: Owner when referring to administration of the whole service
+
+**Staff user**:
+A user authorized to use the administration panel within their granted administrative permissions.
+
+**Superuser**:
+A staff user with all administrative permissions without needing individual permission grants.
+
+**Deactivated user**:
+A user whose access to Payment Share is disabled across all workspaces while their identity, memberships, and history are retained.
+
 **Expense**:
 An amount paid by one member on behalf of selected members. The payer shares the expense only when included among those members.
 _Avoid_: Transaction when specifically referring to an expense

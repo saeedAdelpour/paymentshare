@@ -1,0 +1,7 @@
+# OpenAPI contract-first HTTP API
+
+Use an explicit OpenAPI document as the source of truth for the HTTP API, with oapi-codegen generating Go request/response types and Chi server interfaces, and Swagger UI rendering the contract and executing requests. The user accepted this approach on 2026-11-03 over generating the contract from Huma operations: the explicit contract establishes the integration boundary for the later React application, while generated transport types remain in the HTTP adapter and application use cases retain business rules.
+
+Deliver Swagger UI during foundation and extend the contract alongside each MVP API ticket. Enable it for local development; availability in other deployments is explicitly configurable and disabled by default. Requests from Swagger UI use normal API authentication and permissions. The member-facing React application follows completion of MVP ticket 10; its detailed design is deferred.
+
+Swagger UI authorizes through the configured OIDC provider using Authorization Code with PKCE and API access tokens; QOR5 retains its separate browser session flow. Document all application API operations, inputs, success responses, relevant errors, authentication, and required headers. QOR5's internal browser routes and identity-provider endpoints are outside this contract. Local checks and CI reject invalid contracts and stale generated Go code; HTTP behavior tests verify requests and responses against the contract.
