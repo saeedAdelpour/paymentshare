@@ -41,7 +41,7 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	cancel()
 	if err != nil {
 		// Driver errors may contain credentials. Never log or return the raw error here.
-		return errors.New("PostgreSQL startup check failed; check DATABASE_URL, credentials, TLS, and database availability")
+		return &databaseStartupError{cause: err}
 	}
 	defer func() {
 		if err := pool.Close(); err != nil {
@@ -86,3 +86,13 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 		return nil
 	}
 }
+
+// databaseStartupError preserves the driver cause for programmatic diagnosis
+// without including potentially sensitive driver text in the public log message.
+type databaseStartupError struct{ cause error }
+
+func (e *databaseStartupError) Error() string {
+	return "PostgreSQL startup check failed; check DATABASE_URL, credentials, TLS, and database availability"
+}
+
+func (e *databaseStartupError) Unwrap() error { return e.cause }

@@ -3,6 +3,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -21,6 +22,9 @@ func TestStartupRejectsInvalidDatabaseConfigurationWithoutExposingSecrets(t *tes
 	}, slog.New(slog.NewJSONHandler(&logs, nil)))
 	if err == nil {
 		t.Fatal("startup accepted an invalid database configuration")
+	}
+	if errors.Unwrap(err) == nil {
+		t.Fatal("startup discarded the underlying diagnostic cause")
 	}
 	if strings.Contains(err.Error()+logs.String(), "secret-marker") {
 		t.Fatal("startup exposed database credentials")
