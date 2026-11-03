@@ -8,20 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/saeedAdelpour/paymentshare/internal/httpapi"
 	"github.com/saeedAdelpour/paymentshare/internal/postgres"
 	"github.com/saeedAdelpour/paymentshare/internal/server"
+	"github.com/saeedAdelpour/paymentshare/internal/testutil"
 )
 
 func TestReadinessReflectsRealPostgresConnectivity(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("TEST_DATABASE_URL is required; use a dedicated test database")
-	}
+	dsn, _ := newDatabase(t)
+	runMigration(t, dsn, "1", true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, pool, err := postgres.Open(ctx, dsn)
@@ -29,11 +27,15 @@ func TestReadinessReflectsRealPostgresConnectivity(t *testing.T) {
 		t.Fatal("could not connect to test PostgreSQL (details suppressed to protect credentials)")
 	}
 	t.Cleanup(func() { _ = pool.Close() })
-	handler := httpapi.New(pool)
+	handler := httpapi.New(pool, false)
 	request := func(path string, code int, body string) {
 		t.Helper()
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		handler.ServeHTTP(response, req)
+		result := response.Result()
+		testutil.ValidateExchange(t, req, result)
+		_ = result.Body.Close()
 		if response.Code != code || response.Body.String() != body {
 			t.Fatalf("%s: got %d %s", path, response.Code, response.Body.String())
 		}
@@ -63,10 +65,8 @@ func (l readyLog) Write(data []byte) (int, error) {
 }
 
 func TestServerStartsAndShutsDownWithPostgres(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("TEST_DATABASE_URL is required; use a dedicated test database")
-	}
+	dsn, _ := newDatabase(t)
+	runMigration(t, dsn, "1", true)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log := readyLog{address: make(chan string, 1)}
@@ -87,10 +87,22 @@ func TestServerStartsAndShutsDownWithPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.ValidateExchange(t, response.Request, response)
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("readiness status: %d", response.StatusCode)
 	}
+	runMigration(t, dsn, "0", true)
+	unavailable, err := client.Get("http://" + address + "/readyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.ValidateExchange(t, unavailable.Request, unavailable)
+	_ = unavailable.Body.Close()
+	if unavailable.StatusCode != http.StatusServiceUnavailable {
+		t.Fatal("running server did not detect schema reversal")
+	}
+	runMigration(t, dsn, "1", true)
 	cancel()
 	select {
 	case err := <-done:

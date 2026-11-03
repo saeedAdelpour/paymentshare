@@ -9,19 +9,29 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/saeedAdelpour/paymentshare/internal/httpapi"
 	"github.com/saeedAdelpour/paymentshare/internal/postgres"
+	"github.com/saeedAdelpour/paymentshare/migrations"
 )
 
 type Config struct {
 	HTTPAddr    string
 	DatabaseURL string
+	DocsEnabled bool
 }
 
 func LoadConfig() (Config, error) {
 	cfg := Config{HTTPAddr: os.Getenv("HTTP_ADDR"), DatabaseURL: os.Getenv("DATABASE_URL")}
+	if value := os.Getenv("SWAGGER_ENABLED"); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, errors.New("SWAGGER_ENABLED must be true or false")
+		}
+		cfg.DocsEnabled = enabled
+	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = "127.0.0.1:8082"
 	}
@@ -41,13 +51,19 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	cancel()
 	if err != nil {
 		// Driver errors may contain credentials. Never log or return the raw error here.
-		return &databaseStartupError{cause: err}
+		return &startupError{message: "PostgreSQL startup check failed; check DATABASE_URL, credentials, TLS, and database availability", cause: err}
 	}
 	defer func() {
 		if err := pool.Close(); err != nil {
 			log.Error("database pool close failed")
 		}
 	}()
+	schemaContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+	schemaErr := migrations.CheckSchema(schemaContext, pool)
+	cancel()
+	if schemaErr != nil {
+		return &startupError{message: "schema compatibility check failed; run the matching release migration command before startup", cause: schemaErr}
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -56,7 +72,7 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 		return fmt.Errorf("listen HTTP: %w", err)
 	}
 	srv := &http.Server{
-		Handler:           httpapi.New(pool),
+		Handler:           httpapi.New(pool, cfg.DocsEnabled),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -87,12 +103,13 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	}
 }
 
-// databaseStartupError preserves the driver cause for programmatic diagnosis
+// startupError preserves the driver cause for programmatic diagnosis
 // without including potentially sensitive driver text in the public log message.
-type databaseStartupError struct{ cause error }
-
-func (e *databaseStartupError) Error() string {
-	return "PostgreSQL startup check failed; check DATABASE_URL, credentials, TLS, and database availability"
+type startupError struct {
+	message string
+	cause   error
 }
 
-func (e *databaseStartupError) Unwrap() error { return e.cause }
+func (e *startupError) Error() string { return e.message }
+
+func (e *startupError) Unwrap() error { return e.cause }
