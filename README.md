@@ -4,6 +4,13 @@ Go/Chi backend with PostgreSQL persistence and OIDC access-token authentication.
 This slice supports registered users and creating, listing, reading, and renaming
 workspaces. Membership management and expense/repayment features are later tickets.
 
+## Contributing
+
+Follow the [engineering standards](docs/engineering-standards.md) when planning,
+implementing, and reviewing changes. Architectural decisions live in
+[`docs/adr/`](docs/adr/); they also describe planned changes beyond the current
+implementation.
+
 ## Local setup
 
 Install Go 1.27+, Docker with Compose, curl, and jq. From the repository root:

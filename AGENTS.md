@@ -1,3 +1,9 @@
+## Engineering standards
+
+Build toward production readiness. Before planning, implementing, or reviewing
+engineering changes, read `docs/engineering-standards.md` and apply its relevant
+requirements. Report verification evidence and remaining production gaps.
+
 ## Agent skills
 
 ### Issue tracker
