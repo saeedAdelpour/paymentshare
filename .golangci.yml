@@ -1,0 +1,11 @@
+version: "2"
+run:
+  build-tags: [integration]
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused

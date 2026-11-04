@@ -1,156 +1,167 @@
 # Payment Share API
 
-Go/Chi backend with PostgreSQL persistence and OIDC access-token authentication.
-This slice supports registered users and creating, listing, reading, and renaming
-workspaces. Membership management and expense/repayment features are later tickets.
+A Go/Chi server with a GORM PostgreSQL connection pool, explicit Goose migrations,
+OpenAPI-generated transport, and local Swagger UI. Authentication and QOR5
+administration follow in foundation 02 and 03; business APIs follow those tickets.
 
-## Contributing
+Follow the [engineering standards](docs/engineering-standards.md),
+[glossary](GLOSSARY.md), and [architecture decisions](docs/adr/) when contributing.
 
-Follow the [engineering standards](docs/engineering-standards.md) when planning,
-implementing, and reviewing changes. Architectural decisions live in
-[`docs/adr/`](docs/adr/); they also describe planned changes beyond the current
-implementation.
+## Start development
 
-## Local setup
-
-Install Go 1.27+, Docker with Compose, curl, and jq. From the repository root:
+Install Go **1.27.3** or newer, Make, and optionally Docker with Compose. From a fresh
+checkout, use the supplied local PostgreSQL setup:
 
 ```sh
 cp .env.example .env
-set -a
-. ./.env
-set +a
+make db-up
+make migrate
 make dev
 ```
 
-PostgreSQL listens on `127.0.0.1:55432`; Keycloak listens on
-`http://localhost:18080`. Wait for Keycloak's realm import to finish:
+Already have PostgreSQL? Skip `make db-up` and set your own `DATABASE_URL` in
+`.env` before running `make migrate` and `make dev`. The database and login must
+already exist. **Migrations change the configured database**; verify the URL
+before invoking them. The API never runs migrations or GORM AutoMigrate at startup.
 
-```sh
-until curl -fsS "$OIDC_ISSUER/.well-known/openid-configuration" >/dev/null; do
-  sleep 2
-done
-make run
-```
+`make dev` loads `.env`, enables Swagger UI by default (an explicit
+`SWAGGER_ENABLED=false` wins), and starts on **127.0.0.1:8082**. Stop with Ctrl+C.
+Go downloads missing dependencies automatically. After setup, starting development
+only requires `make dev`. Run `make migrate` explicitly when the release changes.
 
-The API listens on `127.0.0.1:8082`. Startup applies embedded, ordered migrations
-in one transaction under a database advisory lock. `make migrate` applies them
-without starting the API. Repeated runs preserve existing data. Compose uses
-named volumes for both services; `docker compose down` preserves them.
+Open:
 
-The development realm has Alice (`alice` / `alice-local`) and Bob
-(`bob` / `bob-local`), both with verified `@example.test` emails. The Keycloak
-admin console is `http://localhost:18080/admin/` (`admin` / `local-admin`).
-It supports registration/login; newly registered users need a verified email
-before using this API. For local manual testing, mark their email verified in
-the admin console. A deployed provider must perform real email verification.
+- [Swagger UI](http://127.0.0.1:8082/docs/) to explore and execute the health API.
+- [OpenAPI contract](http://127.0.0.1:8082/openapi.yaml).
+- [Process health](http://127.0.0.1:8082/healthz).
+- [Database readiness](http://127.0.0.1:8082/readyz).
 
-The local CLI client permits a password grant to make backend testing convenient:
+The root `/` has no homepage and returns 404. Swagger uses local, pinned assets;
+no CDN or public validator is contacted. OIDC authorization arrives in foundation 02.
 
-```sh
-TOKENS=$(curl -fsS "$OIDC_ISSUER/protocol/openid-connect/token" \
-  -d grant_type=password -d client_id=paymentshare-local \
-  -d username=alice -d password=alice-local -d 'scope=openid email profile')
-TOKEN=$(printf '%s' "$TOKENS" | jq -r .access_token)
+`.env` uses shell syntax, is ignored by Git, and is loaded by `make dev` and
+`make migrate`. These commands also accept an already-exported configuration
+if `.env` is absent.
 
-curl -fsS http://localhost:8082/me -H "Authorization: Bearer $TOKEN"
-curl -fsS http://localhost:8082/workspaces \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Home","currency":"USD"}'
-curl -fsS http://localhost:8082/workspaces -H "Authorization: Bearer $TOKEN"
-# Use the workspace ID from the creation response:
-curl -fsS -X PATCH http://localhost:8082/workspaces/WORKSPACE_ID \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"New home"}'
-```
+| Command | Configuration | Purpose |
+| --- | --- | --- |
+| `make dev` | Loads local `.env`; defaults Swagger to enabled | Run the API locally |
+| `make run` | Exported environment only; ignores `.env` | Run the API with deployment or CI configuration |
+| `make ci` | Exported `TEST_DATABASE_URL` | Run quality checks and tests; integration tests start and stop servers themselves |
 
-Use `access_token`, never `id_token`. Local credentials, password grants,
-development-mode Keycloak, and HTTP are for local development only. Deployed
-clients should use their provider's authorization-code flow with PKCE and HTTPS.
-The supplied realm follows Keycloak's documented [container setup](https://www.keycloak.org/server/containers)
-and [startup realm import](https://www.keycloak.org/server/importExport).
-Realm imports skip existing realms; editing the JSON does not overwrite a realm
-already persisted in the local Keycloak volume.
-
-## Configuration and identity contract
+For local development, use `make dev`. To use `make run`, export `DATABASE_URL`
+first, along with any optional configuration. Documentation remains disabled
+unless `SWAGGER_ENABLED=true` is exported. GitHub Actions supplies its test
+database URL directly and runs `make ci`; it does not need a separate, blocking
+`make run` step.
 
 | Variable | Meaning |
 | --- | --- |
-| `DATABASE_URL` | Required PostgreSQL connection string |
-| `OIDC_ISSUER` | Required exact discovery issuer URL |
-| `OIDC_AUDIENCE` | Required dedicated API audience, distinct from the login client |
-| `SUPPORTED_CURRENCIES` | Comma-separated supported codes; defaults to `USD,EUR,GBP,IRR` |
-| `HTTP_ADDR` | Defaults to `127.0.0.1:8082` |
-| `TEST_DATABASE_URL` | Required for tests; role must be able to create schemas |
+| `DATABASE_URL` | Required PostgreSQL URL or pgx keyword/value connection string |
+| `HTTP_ADDR` | Defaults to `127.0.0.1:8082`; `:8082` permits container access |
+| `SWAGGER_ENABLED` | Boolean; defaults to false in the application; `make dev` defaults to true |
+| `TEST_DATABASE_URL` | Required for integration checks; role must be able to create schemas |
 
-The provider must issue RS256-signed JWT **access tokens** carrying `iss`, `sub`,
-`aud`, `exp`, `email`, and boolean `email_verified: true`. Supported purpose
-markers are the protected JWT header `typ: at+jwt` (also `application/at+jwt`),
-or Keycloak's protected `typ: JWT` with the signed payload `typ: Bearer`.
-Other token profiles and opaque access tokens require an adapter change; merely
-matching issuer and audience never makes an ID token acceptable. The verifier
-uses discovery/JWKS, caches keys, validates signatures locally, and rejects
-expired or not-yet-valid tokens. It does not introspect tokens on each request.
-Provider logout/revocation therefore takes effect when an issued token expires;
-workspace authorization is read from PostgreSQL on every request.
+URL-encode special characters in URL usernames/passwords. Keep secrets in `.env`
+or your deployment secret store. The Compose credentials and `sslmode=disable`
+are for local development only; configure verified TLS for remote databases.
+Compose binds PostgreSQL to loopback on port **55432**. It creates development
+and test databases when initializing its named volume. `make db-down` preserves
+that volume; changing initialization SQL does not modify an existing volume.
 
-Registration in the API happens on the first authenticated request. Internal
-user IDs are stable for `(issuer, subject)`, even if the verified email changes.
-Emails are stored exactly as verified; they are not normalized or used to merge
-identities. An email already held by another identity returns `409`. The provider
-must restrict verification to addresses the person controls. Hosted provider
-selection and production provisioning remain deployment work.
+The API checks connectivity and exact schema compatibility before listening.
+Startup failures exit nonzero with credential-safe messages; underlying causes
+remain available programmatically. A PostgreSQL connection check has a five-second
+timeout. Health responses disable caching and return JSON:
 
-## HTTP contract
-
-All endpoints require `Authorization: Bearer <access_token>` and return JSON.
-Successful workspace responses contain `id`, `name`, `currency`, and `owner_id`.
-
-| Method and path | Request / response |
+| Method and path | Behavior |
 | --- | --- |
-| `GET /me` | `200` with internal `id` and verified `email` |
-| `POST /workspaces` | `{ "name": "Home", "currency": "USD" }`; `201` plus `Location` |
-| `GET /workspaces` | `200` array of accessible workspaces, ordered by ID; empty array when none |
-| `GET /workspaces/{id}` | `200` workspace |
-| `PATCH /workspaces/{id}` | `{ "name": "New home" }`; owner-only, `200` updated workspace |
+| `GET /healthz` | 200 `{"status":"ok"}`; independent of PostgreSQL |
+| `GET /readyz` | 200 `{"status":"ok"}` when PostgreSQL and schema are ready; otherwise 503 `{"status":"unavailable"}` |
 
-Names are trimmed, must contain 1–120 Unicode characters, and cannot contain
-control characters. Currency must exactly match a configured code. Rename
-cannot change currency or ownership. Unknown fields, malformed JSON, invalid
-IDs, and invalid workspace values return `400`; bodies are limited to 16 KiB.
-Authentication failures return `401` with `WWW-Authenticate`; inaccessible or
-missing workspaces return `404`. A future ordinary member attempting an owner
-operation receives `403`. Errors are `{ "error": "message" }`.
+Readiness has a two-second timeout. SIGINT/SIGTERM drains in-flight requests for
+up to ten seconds before closing connections. The pool permits ten open/five idle
+connections, with a 30-minute lifetime and five-minute idle timeout. These are
+initial limits, not measured capacity claims.
 
-Each workspace has one owner, who is also a member, and one currency. Workspace
-and owner membership are committed atomically; PostgreSQL enforces the owner
-membership relationship. Renames lock the workspace and caller's membership,
-check the current owner, and commit the change together. Failed mutations leave
-workspace state unchanged. Creation request-key semantics and currency changes
-are not part of this ticket.
-
-## Tests and checks
+## Migrations and deployment
 
 ```sh
-# After exporting .env as above; Keycloak is not required for automated tests.
-docker compose up -d --wait postgres
-make check
-make test
-# Focused HTTP scenario:
-go test ./integration -run TestOnlyOwnerCanReadAndRenameWorkspace -count=1
+make migrate           # load local .env and migrate to this release's latest version
+make migrate TO=0      # local reversal to version zero
+make migrate TO=1      # local upgrade to the baseline
+# Deployment: use exported DATABASE_URL rather than a local .env:
+go run ./cmd/migrate -to 1
+go run ./cmd/api
 ```
 
-Tests fail explicitly if `TEST_DATABASE_URL` is missing. Each test creates its
-own random PostgreSQL schema, applies migrations, exercises the API over HTTP
-with a controlled local RSA/JWKS identity provider, and drops its schema on
-completion. They never truncate application tables. Assertions observe HTTP
-responses, including persisted data after API restart, concurrent initial
-registration, cross-user isolation, rejected writes, and invalid access tokens.
+Goose **v3.29.0** executes embedded, reviewed SQL migrations transactionally and
+serializes execution with a PostgreSQL session advisory lock. Commands have a
+60-second work deadline plus at most five seconds for detached unlock cleanup.
+Repeating a target is harmless. Unsupported targets and
+schemas newer than the migration binary are rejected. Version zero is deliberately
+incompatible with the current server, which expects **version 1**.
 
-The single Payment Share bounded context is organized as:
+The first migration establishes Goose tracking only; there are no domain tables
+yet. Its Down preserves the tracking table and all existing application data.
+Round-trip tests retain a Unicode/numeric fixture across 1 → 0 → 1. This verifies
+the baseline, not the reversibility of future domain migrations.
 
-- `internal/domain`: user and workspace concepts and workspace invariants.
-- `internal/application`: use cases, authorization, repository contracts, transactions.
-- `internal/httpapi`, `internal/identity`, `internal/postgres`: adapters.
-- `internal/server`: composition; `cmd/api` and `cmd/migrate`: executables.
-- `migrations`: embedded, versioned PostgreSQL schema.
+See [deployment and recovery](docs/deployment.md) for migration-before-start,
+API/admin arrangement, previous-release compatibility, and production recovery.
+
+## Contract and quality checks
+
+[`api/openapi.yaml`](api/openapi.yaml) is the source of truth. Generated transport
+types and Chi interfaces stay in `internal/httpapi`. Document application API
+operations there as they are added; QOR5 internal browser routes and provider
+endpoints are outside this contract. Documentation routes serve the contract and
+UI but are not application API operations.
+
+```sh
+make deps                 # download application and separate tool-module dependencies
+make tools                # build pinned tools into ignored bin/
+make generate             # regenerate the Chi interface and Go transport types
+make check-contract       # validate OpenAPI; SPEC=path validates a different document
+make check-generated      # compare generated code without changing the checkout
+make test-contract-tools  # prove invalid contracts and stale code are rejected
+make fmt                  # apply pinned gofumpt formatting
+make check                # formatting, contract, generation, build, lint, security
+make test                 # race-enabled unit/HTTP tests
+# Export TEST_DATABASE_URL from .env before database checks:
+set -a; . ./.env; set +a
+make test-integration     # real PostgreSQL command and HTTP behavior tests
+make ci                   # same checks and full race suite used by CI
+```
+
+Tools are pinned with checksums in the separate [`tools/go.mod`](tools/go.mod)
+and `tools/go.sum`: oapi-codegen v2.8.2, gofumpt v0.12.0, golangci-lint v2.15.0,
+and govulncheck v1.8.0. The linter initially enables
+**govet, staticcheck, errcheck, ineffassign, unused** for application and integration
+code. `make check` fails on formatting, contract, stale output, analysis, or
+vulnerability errors; unavailable vulnerability data fails visibly. It requires
+network access for first-time tool downloads and vulnerability data.
+
+The HTTP harness validates requests and responses against OpenAPI for both healthy
+and unavailable readiness, alongside explicit behavior assertions. Database tests
+execute the real migration binary, create random schemas, and remove only their
+own schemas afterward. They check target-version Up/Down/Up, retained fixtures,
+unmigrated/older/newer schema rejection, startup without automatic migrations,
+readiness after a schema change, bounded cancellation/unlock cleanup through a
+real PostgreSQL TCP proxy,
+and graceful shutdown. The fault-injection test requires a local TCP database
+that permits non-TLS connections (as provided by Compose/CI). Never point tests at
+production. Missing `TEST_DATABASE_URL` is a failure, not a silent skip.
+
+Before pushing, run `go version` and `make ci` with `TEST_DATABASE_URL` exported
+as shown above. Use an official Go release meeting the minimum in `go.mod`;
+Go can download that toolchain automatically when `GOTOOLCHAIN=auto`. Run
+`make vuln` for a focused vulnerability check. A passing scan only covers
+advisories known at scan time; keep CI enabled and update Go security releases.
+
+The [CI job](.github/workflows/quality.yml) supplies PostgreSQL 17.11 and reads
+its Go version from `go.mod`, keeping the minimum and CI toolchain aligned.
+Local Docker setup uses the same PostgreSQL version.
+Browser assets and licensing are recorded in [third-party notices](THIRD_PARTY.md).
+Verification evidence and remaining release gaps are in
+[foundation verification](docs/foundation-verification.md).
