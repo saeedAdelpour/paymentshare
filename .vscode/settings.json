@@ -1,0 +1,6 @@
+{
+    "gopls": {
+        "ui.navigation.importShortcut": "Definition"
+    },
+    "editor.formatOnSave": true
+}
