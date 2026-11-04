@@ -9,7 +9,7 @@ Follow the [engineering standards](docs/engineering-standards.md),
 
 ## Start development
 
-Install Go **1.27.1**, Make, and optionally Docker with Compose. From a fresh
+Install Go **1.27.3** or newer, Make, and optionally Docker with Compose. From a fresh
 checkout, use the supplied local PostgreSQL setup:
 
 ```sh
@@ -39,10 +39,21 @@ Open:
 The root `/` has no homepage and returns 404. Swagger uses local, pinned assets;
 no CDN or public validator is contacted. OIDC authorization arrives in foundation 02.
 
-`.env` uses shell syntax, is ignored by Git, and is loaded by `make dev`,
-`make run`, and `make migrate`. These commands also accept an already-exported
-configuration if `.env` is absent. `make run` leaves documentation disabled
-unless explicitly enabled.
+`.env` uses shell syntax, is ignored by Git, and is loaded by `make dev` and
+`make migrate`. These commands also accept an already-exported configuration
+if `.env` is absent.
+
+| Command | Configuration | Purpose |
+| --- | --- | --- |
+| `make dev` | Loads local `.env`; defaults Swagger to enabled | Run the API locally |
+| `make run` | Exported environment only; ignores `.env` | Run the API with deployment or CI configuration |
+| `make ci` | Exported `TEST_DATABASE_URL` | Run quality checks and tests; integration tests start and stop servers themselves |
+
+For local development, use `make dev`. To use `make run`, export `DATABASE_URL`
+first, along with any optional configuration. Documentation remains disabled
+unless `SWAGGER_ENABLED=true` is exported. GitHub Actions supplies its test
+database URL directly and runs `make ci`; it does not need a separate, blocking
+`make run` step.
 
 | Variable | Meaning |
 | --- | --- |
@@ -142,8 +153,15 @@ and graceful shutdown. The fault-injection test requires a local TCP database
 that permits non-TLS connections (as provided by Compose/CI). Never point tests at
 production. Missing `TEST_DATABASE_URL` is a failure, not a silent skip.
 
-The [CI job](.github/workflows/quality.yml) supplies PostgreSQL 17.11 and runs
-`make ci` on Go 1.27.1. Local Docker setup uses the same PostgreSQL version.
+Before pushing, run `go version` and `make ci` with `TEST_DATABASE_URL` exported
+as shown above. Use an official Go release meeting the minimum in `go.mod`;
+Go can download that toolchain automatically when `GOTOOLCHAIN=auto`. Run
+`make vuln` for a focused vulnerability check. A passing scan only covers
+advisories known at scan time; keep CI enabled and update Go security releases.
+
+The [CI job](.github/workflows/quality.yml) supplies PostgreSQL 17.11 and reads
+its Go version from `go.mod`, keeping the minimum and CI toolchain aligned.
+Local Docker setup uses the same PostgreSQL version.
 Browser assets and licensing are recorded in [third-party notices](THIRD_PARTY.md).
 Verification evidence and remaining release gaps are in
 [foundation verification](docs/foundation-verification.md).

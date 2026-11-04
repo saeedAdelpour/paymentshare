@@ -1,6 +1,6 @@
 module github.com/saeedAdelpour/paymentshare
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/getkin/kin-openapi v0.144.0

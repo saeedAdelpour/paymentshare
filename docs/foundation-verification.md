@@ -5,6 +5,20 @@ Verified locally on 2026-11-03 using Linux amd64, Go
 in Compose and CI. Verification used a separate Compose project and test database;
 the user's configured application database was not migrated or otherwise changed.
 
+Security verification limitation identified on 2026-11-04: GitHub CI using the
+official Go 1.27.1 release reported standard-library vulnerabilities that the
+custom local `go1.27.1-X:nodwarf5` scan did not report. The earlier clean scan
+does not establish security parity with the official toolchain. The application
+and tools modules now require Go 1.27.3, and CI reads its version from `go.mod`.
+Use the patched official toolchain for subsequent verification; hosted CI must
+still confirm the updated result.
+
+Reverified locally on 2026-11-04 with official `go1.27.3 linux/amd64`:
+workflow validation with actionlint v1.7.7 passed, and full `make ci` passed,
+including zero lint issues, no reported vulnerabilities, and the race-enabled
+PostgreSQL integration suite. The test database URL was supplied for the local
+Compose test database; tests used their isolated schemas.
+
 ## Evidence
 
 - The documented Compose service started from a new named volume, initialized

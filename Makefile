@@ -24,13 +24,13 @@ dev:
 	@sh scripts/with-env.sh sh -c 'export SWAGGER_ENABLED="$${SWAGGER_ENABLED:-true}"; exec go run ./cmd/api'
 
 run:
-	@sh scripts/with-env.sh go run ./cmd/api
+	go run ./cmd/api
 
 migrate:
 	@sh scripts/with-env.sh go run ./cmd/migrate $(if $(TO),-to $(TO),)
 
 db-up:
-	docker compose up -d --wait postgres
+	docker compose up -d
 
 db-down:
 	docker compose down
