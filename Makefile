@@ -24,7 +24,7 @@ dev:
 	@sh scripts/with-env.sh sh -c 'export SWAGGER_ENABLED="$${SWAGGER_ENABLED:-true}"; exec go run ./cmd/api'
 
 run:
-	go run ./cmd/api
+	@sh scripts/with-env.sh go run ./cmd/api
 
 migrate:
 	@sh scripts/with-env.sh go run ./cmd/migrate $(if $(TO),-to $(TO),)

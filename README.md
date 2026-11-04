@@ -39,10 +39,10 @@ Open:
 The root `/` has no homepage and returns 404. Swagger uses local, pinned assets;
 no CDN or public validator is contacted. OIDC authorization arrives in foundation 02.
 
-`.env` uses shell syntax, is ignored by Git, and is loaded by `make dev` and
-`make migrate`. These commands also accept an already-exported configuration if
-`.env` is absent. `make run` uses the exported environment without loading `.env`
-and leaves documentation disabled unless explicitly enabled.
+`.env` uses shell syntax, is ignored by Git, and is loaded by `make dev`,
+`make run`, and `make migrate`. These commands also accept an already-exported
+configuration if `.env` is absent. `make run` leaves documentation disabled
+unless explicitly enabled.
 
 | Variable | Meaning |
 | --- | --- |
